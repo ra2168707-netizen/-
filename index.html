@@ -210,12 +210,18 @@ async function addIdea(){ const t = $("#it").value.trim(); if (!t) return; await
 // ---------- الدخول والتسجيل ----------
 let me = null;
 async function boot(){
-  if (!sb){ await load(); return render(); }
-  const {data} = await sb.auth.getSession(); me = data.session ? data.session.user : null;
-  sb.auth.onAuthStateChange((e,s) => { if (e==="SIGNED_IN" && s && !me){ me = s.user; $("#nav").style.display = ""; document.querySelector(".app").style.gridTemplateColumns = ""; start(); } });
-  me ? start() : authView();
+  try{
+    if (!sb){ await load(); return render(); }
+    const {data} = await sb.auth.getSession(); me = data.session ? data.session.user : null;
+    me ? start() : authView();
+  }catch(e){ $("#main").innerHTML = `<div class="card">حصلت مشكلة في فتح الموقع: ${esc(e.message||e)}</div>`; }
 }
-async function start(){ await load(); render(); }
+async function start(){
+  $("#nav").style.display = ""; document.querySelector(".app").style.gridTemplateColumns = "";
+  $("#main").innerHTML = `<p class="sub">ثانية، بحمّل بياناتك…</p>`; renderNav();
+  try{ await load(); }catch(e){ toast("مشكلة في تحميل البيانات: "+(e.message||e)); }
+  try{ render(); }catch(e){ $("#main").innerHTML = `<div class="card">مشكلة في العرض: ${esc(e.message||e)}</div>`; }
+}
 function authView(){
   $("#nav").innerHTML = ""; $("#nav").style.display = "none"; document.querySelector(".app").style.gridTemplateColumns = "1fr";
   $("#main").innerHTML = `<div class="card" style="max-width:380px;margin:8vh auto;background:var(--beige)"><h2>أهلًا بيكي 🌸</h2><p class="sub">اكتبي اسمك وسنتك الدراسية وابدئي.</p>
