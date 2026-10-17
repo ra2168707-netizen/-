@@ -50,8 +50,8 @@ dialog::backdrop{background:#4a445855}
 <dialog id="dlg"></dialog><div id="toast"></div>
 <script>
 // ====== اربطي Supabase هنا (لو سبتيهم فاضيين الداتا بتتحفظ في المتصفح بس) ======
-const SUPABASE_URL = "";
-const SUPABASE_ANON_KEY = "";
+const SUPABASE_URL = "https://wlaeekrkdwomqxwhpcyd.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_U1IuWflw-dgGqWkHsR0QDA_25RH3iJV";
 // ================================================================================
 const sb = SUPABASE_URL ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 const SUBJECTS = ["Pharmacology","Medical Microbiology","Clinical Pharmacy","Clinical Pharmacokinetics","Nutrition","Pharmaceutical Technology","تشريعات وإدارة وتسجيل وأخلاقيات المهنة"];
@@ -139,7 +139,7 @@ function vLectures(){
    <textarea placeholder="ملخصك هنا" onchange="upd('lectures','${l.id}',{summary:this.value},false)">${esc(l.summary)}</textarea>
    ${l.key_points ? `<div class="card" style="background:var(--beige);margin-top:8px"><b>اللي الدكتور ركّز عليه</b><div style="white-space:pre-wrap">${esc(l.key_points)}</div></div>` : ""}
    <div class="row" style="margin-top:8px"><button class="btn blue" onclick="openQuiz('${l.id}')">اختبار (${n})</button><button class="btn pink" onclick="addQ('${l.id}')">+ سؤال</button>
-   <label class="btn ghost">🎙️ ارفعي ريكورد وحلّليه<input type="file" accept="audio/*" hidden onchange="processRec('${l.id}',this.files[0])"></label>
+   <button class="btn" onclick="aiOpen('${l.id}')">🤖 المساعد الذكي</button>
    <button class="btn ghost" onclick="del('lectures','${l.id}')">حذف</button></div></div>`; }).join("") || `<p class="sm">ضيفي أول محاضرة.</p>`}`;
 }
 async function addLec(){ const t = $("#lt").value.trim(); if (!t) return toast("اكتبي اسم المحاضرة"); await save("lectures",{subject:$("#ls").value,title:t,status:"new",difficulty:+$("#ld").value,minutes:+$("#lm").value||null,summary:"",pdf_url:"",video_url:"",record_url:"",key_points:""}); render(); }
@@ -163,20 +163,44 @@ function addQ(lid){
 async function saveQ(lid){ const o = [0,1,2,3].map(i => $("#o"+i).value.trim()).filter(Boolean); if (!$("#nq").value.trim() || o.length<2) return toast("اكتبي السؤال واختيارين على الأقل");
   await save("questions",{lecture_id:lid,q:$("#nq").value.trim(),options:o,answer:+$("#na").value,explanation:$("#ne").value.trim()}); $("#dlg").close(); render(); toast("اتحفظ السؤال"); }
 
-// ---------- تحليل الريكورد (محتاج Supabase + Edge Function اسمها process-lecture) ----------
-async function processRec(id,file){
-  if (!file) return;
-  if (!sb) return toast("اربطي Supabase الأول (الخطوات في الشات)");
-  toast("بارفع الريكورد…");
-  const path = id+"/"+Date.now()+"-"+file.name.replace(/[^\w.]/g,"_");
-  const up = await sb.storage.from("records").upload(path,file); if (up.error) return toast(up.error.message);
-  toast("بحلّل الريكورد، استني دقايق…");
-  const {data,error} = await sb.functions.invoke("process-lecture",{body:{lecture_id:id,path}});
-  if (error) return toast("الخدمة لسه مش متفعلة: "+error.message);
-  await upd("lectures",id,{record_url:path,transcript:data.transcript||"",key_points:data.key_points||""},false);
-  for (const x of data.questions||[]) await save("questions",{lecture_id:id,q:x.q,options:x.options,answer:x.answer,explanation:x.explanation||""});
-  render(); toast("خلص! شوفي الأسئلة الجديدة");
+// ---------- المساعد الذكي (Edge Function: ai-helper) ----------
+let aiText = "";
+function aiOpen(id){
+  const l = get("lectures",id);
+  $("#dlg").innerHTML = `<h3>🤖 المساعد الذكي — ${esc(l.title)}</h3>
+  <p class="sm">ارفعي PDF أو ريكورد أو فيديو أو ملف نص، أو الصقي نص، وبعدها اختاري إيه اللي تعمليه.</p>
+  <input type="file" id="aif" accept=".pdf,.txt,audio/*,video/*" style="width:100%">
+  <textarea id="ait" placeholder="أو الصقي نص هنا" style="margin-top:8px"></textarea>
+  <input id="aiq" placeholder="اكتبي سؤالك أو طلبك (اختياري)" style="width:100%;margin:8px 0">
+  <div class="row"><button class="btn" onclick="aiRun('${id}','explain')">اشرحي لي</button><button class="btn blue" onclick="aiRun('${id}','summarize')">لخّصي واللي مهم</button><button class="btn pink" onclick="aiRun('${id}','quiz')">اعملي أسئلة</button><button class="btn ghost" onclick="aiRun('${id}','ask')">جاوبي سؤالي</button></div>
+  <div id="aiout" class="card" style="margin:12px 0;white-space:pre-wrap;display:none"></div>
+  <button class="btn ghost" onclick="$('#dlg').close()">قفل</button>`;
+  $("#dlg").showModal();
 }
+async function aiRun(id,task){
+  if (!sb) return toast("اربطي Supabase الأول");
+  const f = $("#aif").files[0], text = $("#ait").value.trim(), question = $("#aiq").value.trim();
+  if (!f && !text) return toast("ارفعي ملف أو الصقي نص الأول");
+  if (task==="ask" && !question) return toast("اكتبي سؤالك");
+  if (f && f.size > 18e6) return toast("الملف كبير (أكتر من 18MB). ارفعي الصوت بس أو قسّميه.");
+  const out = $("#aiout"); out.style.display = "block"; out.textContent = "بشتغل… ممكن ياخد دقيقة ⏳";
+  let path = null;
+  if (f){
+    path = id+"/"+Date.now()+"-"+f.name.replace(/[^\w.]/g,"_");
+    const up = await sb.storage.from("records").upload(path,f,{contentType:f.type});
+    if (up.error){ out.textContent = "الرفع فشل: "+up.error.message; return; }
+  }
+  const {data,error} = await sb.functions.invoke("ai-helper",{body:{task,text,question,path,mime:f?f.type:null}});
+  if (error || !data || data.error){ out.textContent = "حصلت مشكلة: "+(data&&data.error||(error&&error.message)||"غير معروفة"); return; }
+  if (task==="quiz"){
+    for (const x of data.questions) await save("questions",{lecture_id:id,q:x.q,options:x.options,answer:x.answer,explanation:x.explanation||""});
+    out.textContent = "اتعملت "+data.questions.length+" سؤال ✅ اقفلي الشاشة واضغطي «اختبار».";
+    render();
+  } else {
+    aiText = data.text; out.innerHTML = esc(aiText)+`<div style="margin-top:10px"><button class="btn blue" onclick="saveNote('${id}')">احفظيه في المحاضرة</button></div>`;
+  }
+}
+async function saveNote(id){ const l = get("lectures",id); await upd("lectures",id,{key_points:(l.key_points?l.key_points+"\n\n":"")+aiText}); toast("اتحفظ ✅"); }
 
 // ---------- خزنة الأفكار ----------
 function ideaList(){
