@@ -87,7 +87,7 @@ const upd = async (t,id,patch,re=true) => { await save(t, {...get(t,id), ...patc
 
 const VIEWS = {day:"يومي", tasks:"المهام", lectures:"المذاكرة والمواد", ideas:"خزنة الأفكار"};
 function renderNav(){
-  $("#nav").innerHTML = "<h1>مذاكرتي 🌸</h1>" + Object.entries(VIEWS).map(([k,v]) => `<button class="${view===k?"on":""}" onclick="go('${k}')">${v}</button>`).join("");
+  $("#nav").innerHTML = "<h1>مذاكرتي 🌸</h1>" + Object.entries(VIEWS).map(([k,v]) => `<button class="${view===k?"on":""}" onclick="go('${k}')">${v}</button>`).join("") + (me ? `<div class="sm" style="margin:18px 8px 4px">${esc((me.user_metadata||{}).full_name||me.email)}</div><button onclick="logout()">خروج</button>` : "");
 }
 const go = v => { view = v; render(); };
 function render(){ renderNav(); $("#main").innerHTML = ({day:vDay,tasks:vTasks,lectures:vLectures,ideas:vIdeas})[view](); }
@@ -130,19 +130,12 @@ async function togSub(id,i){ const t = get("tasks",id); const s = t.subtasks.map
 // ---------- المذاكرة والمواد ----------
 function vLectures(){
   const list = S.lectures.filter(l => filter==="all" || l.subject===filter);
-  return `<h2>المذاكرة والمواد</h2><p class="sub">كل محاضرة فيها PDF وفيديو وريكورد واختبار.</p>
+  return `<h2>المواد والمحاضرات</h2><p class="sub">اختاري مادة، وافتحي أي محاضرة عشان تذاكري بمساعدة الـ AI.</p>
   <div class="row" style="margin-bottom:14px"><button class="chip ${filter==="all"?"on":""}" onclick="filter='all';render()">الكل</button>${SUBJECTS.map(s => `<button class="chip ${filter===s?"on":""}" onclick="filter=this.dataset.s;render()" data-s="${esc(s)}">${esc(s)}</button>`).join("")}</div>
-  <div class="card row"><select id="ls">${SUBJECTS.map(s => `<option ${filter===s?"selected":""}>${esc(s)}</option>`).join("")}</select><input id="lt" placeholder="اسم المحاضرة" style="flex:1"><select id="ld"><option value="1">سهلة</option><option value="2" selected>متوسطة</option><option value="3">صعبة</option></select><input id="lm" type="number" placeholder="دقايق" style="width:90px"><button class="btn" onclick="addLec()">إضافة</button></div>
-  ${list.map(l => { const n = S.questions.filter(x => x.lecture_id===l.id).length; return `<div class="card">
-   <div class="row"><b style="flex:1">${esc(l.title)}</b><span class="tag">${esc(l.subject)}</span><select onchange="upd('lectures','${l.id}',{status:this.value})">${Object.entries(STATUS).map(([k,v]) => `<option value="${k}" ${l.status===k?"selected":""}>${v}</option>`).join("")}</select></div>
-   <div class="row" style="margin:8px 0">${[["pdf_url","PDF"],["video_url","فيديو"],["record_url","ريكورد"]].map(([f,n2]) => `<input placeholder="رابط ${n2}" value="${esc(l[f])}" onchange="upd('lectures','${l.id}',{${f}:this.value},false)" style="flex:1;min-width:120px">${l[f]?`<a href="${esc(l[f])}" target="_blank" rel="noopener">${n2}</a>`:""}`).join("")}</div>
-   <textarea placeholder="ملخصك هنا" onchange="upd('lectures','${l.id}',{summary:this.value},false)">${esc(l.summary)}</textarea>
-   ${l.key_points ? `<div class="card" style="background:var(--beige);margin-top:8px"><b>اللي الدكتور ركّز عليه</b><div style="white-space:pre-wrap">${esc(l.key_points)}</div></div>` : ""}
-   <div class="row" style="margin-top:8px"><button class="btn blue" onclick="openQuiz('${l.id}')">اختبار (${n})</button><button class="btn pink" onclick="addQ('${l.id}')">+ سؤال</button>
-   <button class="btn" onclick="aiOpen('${l.id}')">🤖 المساعد الذكي</button>
-   <button class="btn ghost" onclick="del('lectures','${l.id}')">حذف</button></div></div>`; }).join("") || `<p class="sm">ضيفي أول محاضرة.</p>`}`;
+  <div class="card row"><select id="ls">${SUBJECTS.map(s => `<option ${filter===s?"selected":""}>${esc(s)}</option>`).join("")}</select><input id="lt" placeholder="اسم المحاضرة الجديدة" style="flex:1"><button class="btn" onclick="addLec()">إضافة</button></div>
+  ${list.map(l => `<div class="card row" style="cursor:pointer" onclick="openLec('${l.id}')"><b style="flex:1">${esc(l.title)}</b><span class="tag">${esc(l.subject)}</span><span class="tag mid">${STATUS[l.status]}</span><span class="sm">${S.questions.filter(x => x.lecture_id===l.id).length} سؤال</span></div>`).join("") || `<p class="sm">ضيفي أول محاضرة من فوق.</p>`}`;
 }
-async function addLec(){ const t = $("#lt").value.trim(); if (!t) return toast("اكتبي اسم المحاضرة"); await save("lectures",{subject:$("#ls").value,title:t,status:"new",difficulty:+$("#ld").value,minutes:+$("#lm").value||null,summary:"",pdf_url:"",video_url:"",record_url:"",key_points:""}); render(); }
+async function addLec(){ const t = $("#lt").value.trim(); if (!t) return toast("اكتبي اسم المحاضرة"); await save("lectures",{subject:$("#ls").value,title:t,status:"new",difficulty:2,summary:"",pdf_url:"",video_url:"",record_url:"",key_points:""}); render(); }
 
 // ---------- الاختبار ----------
 let qs = [], qi = 0, score = 0;
@@ -163,18 +156,18 @@ function addQ(lid){
 async function saveQ(lid){ const o = [0,1,2,3].map(i => $("#o"+i).value.trim()).filter(Boolean); if (!$("#nq").value.trim() || o.length<2) return toast("اكتبي السؤال واختيارين على الأقل");
   await save("questions",{lecture_id:lid,q:$("#nq").value.trim(),options:o,answer:+$("#na").value,explanation:$("#ne").value.trim()}); $("#dlg").close(); render(); toast("اتحفظ السؤال"); }
 
-// ---------- المساعد الذكي (Edge Function: ai-helper) ----------
+// ---------- صفحة المحاضرة + المساعد الذكي ----------
 let aiText = "";
-function aiOpen(id){
-  const l = get("lectures",id);
-  $("#dlg").innerHTML = `<h3>🤖 المساعد الذكي — ${esc(l.title)}</h3>
-  <p class="sm">ارفعي PDF أو ريكورد أو فيديو أو ملف نص، أو الصقي نص، وبعدها اختاري إيه اللي تعمليه.</p>
-  <input type="file" id="aif" accept=".pdf,.txt,audio/*,video/*" style="width:100%">
-  <textarea id="ait" placeholder="أو الصقي نص هنا" style="margin-top:8px"></textarea>
-  <input id="aiq" placeholder="اكتبي سؤالك أو طلبك (اختياري)" style="width:100%;margin:8px 0">
-  <div class="row"><button class="btn" onclick="aiRun('${id}','explain')">اشرحي لي</button><button class="btn blue" onclick="aiRun('${id}','summarize')">لخّصي واللي مهم</button><button class="btn pink" onclick="aiRun('${id}','quiz')">اعملي أسئلة</button><button class="btn ghost" onclick="aiRun('${id}','ask')">جاوبي سؤالي</button></div>
-  <div id="aiout" class="card" style="margin:12px 0;white-space:pre-wrap;display:none"></div>
-  <button class="btn ghost" onclick="$('#dlg').close()">قفل</button>`;
+function openLec(id){
+  const l = get("lectures",id), n = S.questions.filter(x => x.lecture_id===id).length;
+  $("#dlg").innerHTML = `<div class="row"><h3 style="flex:1;margin:0">${esc(l.title)}</h3><select onchange="upd('lectures','${id}',{status:this.value})">${Object.entries(STATUS).map(([k,v]) => `<option value="${k}" ${l.status===k?"selected":""}>${v}</option>`).join("")}</select></div>
+  <div class="card" style="background:var(--lav);margin-top:12px"><b>🤖 المساعد الذكي</b><p class="sm" style="margin:4px 0 8px">ارفعي PDF أو ريكورد أو فيديو أو نص، أو الصقي كلام، وبعدين اختاري.</p>
+  <input type="file" id="aif" accept=".pdf,.txt,audio/*,video/*" style="width:100%;background:#fff"><textarea id="ait" placeholder="أو الصقي نص هنا" style="margin-top:8px;background:#fff"></textarea><input id="aiq" placeholder="سؤالك (اختياري)" style="width:100%;margin:8px 0;background:#fff">
+  <div class="row"><button class="btn pink" onclick="aiRun('${id}','explain')">اشرحي لي</button><button class="btn blue" onclick="aiRun('${id}','summarize')">لخّصي واللي مهم</button><button class="btn" style="background:#fff" onclick="aiRun('${id}','quiz')">اعملي أسئلة</button><button class="btn" style="background:#fff" onclick="aiRun('${id}','ask')">جاوبي سؤالي</button></div>
+  <div id="aiout" class="card" style="margin:12px 0 0;white-space:pre-wrap;display:none"></div></div>
+  ${l.key_points ? `<div class="card" style="background:var(--beige)"><b>ملاحظاتي المحفوظة</b><div style="white-space:pre-wrap">${esc(l.key_points)}</div></div>` : ""}
+  <details class="card"><summary>الروابط والملخص</summary><div style="margin-top:8px">${[["pdf_url","رابط PDF"],["video_url","رابط الفيديو"],["record_url","رابط الريكورد"]].map(([f,t]) => `<input placeholder="${t}" value="${esc(l[f])}" onchange="upd('lectures','${id}',{${f}:this.value},false)" style="width:100%;margin-bottom:6px">`).join("")}<textarea placeholder="ملخصي" onchange="upd('lectures','${id}',{summary:this.value},false)">${esc(l.summary)}</textarea></div></details>
+  <div class="row"><button class="btn blue" onclick="openQuiz('${id}')">ابدئي الاختبار (${n})</button><button class="btn pink" onclick="addQ('${id}')">+ سؤال بإيدي</button><button class="btn ghost" onclick="if(confirm('تمسحي المحاضرة؟')){del('lectures','${id}');$('#dlg').close()}">حذف</button><button class="btn ghost" onclick="$('#dlg').close()">قفل</button></div>`;
   $("#dlg").showModal();
 }
 async function aiRun(id,task){
@@ -182,25 +175,23 @@ async function aiRun(id,task){
   const f = $("#aif").files[0], text = $("#ait").value.trim(), question = $("#aiq").value.trim();
   if (!f && !text) return toast("ارفعي ملف أو الصقي نص الأول");
   if (task==="ask" && !question) return toast("اكتبي سؤالك");
-  if (f && f.size > 18e6) return toast("الملف كبير (أكتر من 18MB). ارفعي الصوت بس أو قسّميه.");
-  const out = $("#aiout"); out.style.display = "block"; out.textContent = "بشتغل… ممكن ياخد دقيقة ⏳";
+  const out = $("#aiout"); out.style.display = "block"; out.textContent = "بشتغل… الملفات الكبيرة بتاخد وقت ⏳";
   let path = null;
   if (f){
-    path = id+"/"+Date.now()+"-"+f.name.replace(/[^\w.]/g,"_");
+    path = me.id+"/"+id+"-"+Date.now()+"-"+f.name.replace(/[^\w.]/g,"_");
     const up = await sb.storage.from("records").upload(path,f,{contentType:f.type});
     if (up.error){ out.textContent = "الرفع فشل: "+up.error.message; return; }
   }
-  const {data,error} = await sb.functions.invoke("ai-helper",{body:{task,text,question,path,mime:f?f.type:null}});
+  const {data,error} = await sb.functions.invoke("ai-helper",{body:{task,text,question,path,mime:f?(f.type||"application/pdf"):null}});
   if (error || !data || data.error){ out.textContent = "حصلت مشكلة: "+(data&&data.error||(error&&error.message)||"غير معروفة"); return; }
   if (task==="quiz"){
     for (const x of data.questions) await save("questions",{lecture_id:id,q:x.q,options:x.options,answer:x.answer,explanation:x.explanation||""});
-    out.textContent = "اتعملت "+data.questions.length+" سؤال ✅ اقفلي الشاشة واضغطي «اختبار».";
-    render();
+    out.textContent = "اتعملت "+data.questions.length+" سؤال ✅ اضغطي «ابدئي الاختبار».";
   } else {
     aiText = data.text; out.innerHTML = esc(aiText)+`<div style="margin-top:10px"><button class="btn blue" onclick="saveNote('${id}')">احفظيه في المحاضرة</button></div>`;
   }
 }
-async function saveNote(id){ const l = get("lectures",id); await upd("lectures",id,{key_points:(l.key_points?l.key_points+"\n\n":"")+aiText}); toast("اتحفظ ✅"); }
+async function saveNote(id){ const l = get("lectures",id); await upd("lectures",id,{key_points:(l.key_points?l.key_points+"\n\n":"")+aiText},false); toast("اتحفظ ✅"); }
 
 // ---------- خزنة الأفكار ----------
 function ideaList(){
@@ -216,7 +207,41 @@ function vIdeas(){
 }
 async function addIdea(){ const t = $("#it").value.trim(); if (!t) return; await save("ideas",{text:t,tags:$("#ig").value.split(/[,،]/).map(s => s.trim()).filter(Boolean)}); render(); }
 
-load().then(render);
+// ---------- الدخول والتسجيل ----------
+let me = null, mode = "in";
+async function boot(){
+  if (!sb){ await load(); return render(); }
+  const {data} = await sb.auth.getSession(); me = data.session ? data.session.user : null;
+  me ? start() : authView();
+}
+async function start(){ await load(); render(); }
+function authView(){
+  $("#nav").innerHTML = ""; $("#nav").style.display = "none"; document.querySelector(".app").style.gridTemplateColumns = "1fr";
+  const su = mode === "up";
+  $("#main").innerHTML = `<div class="card" style="max-width:380px;margin:8vh auto;background:var(--beige)"><h2>مذاكرتي 🌸</h2><p class="sub">${su?"اعملي حساب جديد":"سجّلي دخول"}</p>
+  ${su?`<input id="an" placeholder="اسمك" style="width:100%;margin-bottom:8px"><select id="ay" style="width:100%;margin-bottom:8px"><option value="">إنتي في سنة رابعة؟</option><option value="true">أيوه، سنة رابعة</option><option value="false">لا</option></select>`:""}
+  <input id="ae" type="email" placeholder="الإيميل" style="width:100%;margin-bottom:8px"><input id="ap" type="password" placeholder="الباسورد (٦ حروف على الأقل)" style="width:100%;margin-bottom:12px">
+  <button class="btn" style="width:100%" onclick="doAuth()">${su?"إنشاء الحساب":"دخول"}</button>
+  <p class="sm" style="text-align:center"><a href="#" onclick="mode='${su?"in":"up"}';authView();return false">${su?"عندي حساب":"مفيش عندي حساب"}</a></p><div id="ae2" class="sm" style="color:#b0455a"></div></div>`;
+}
+async function doAuth(){
+  const email = $("#ae").value.trim(), password = $("#ap").value, err = $("#ae2");
+  if (mode === "up"){
+    const name = $("#an").value.trim(), y = $("#ay").value;
+    if (!name || !y) return err.textContent = "اكتبي اسمك واختاري هل إنتي في سنة رابعة";
+    const {data,error} = await sb.auth.signUp({email,password,options:{data:{full_name:name,is_fourth_year:y==="true"}}});
+    if (error) return err.textContent = error.message;
+    if (!data.session) return err.textContent = "اتبعتلك إيميل تأكيد، افتحيه وبعدين ادخلي.";
+    me = data.user;
+  } else {
+    const {data,error} = await sb.auth.signInWithPassword({email,password});
+    if (error) return err.textContent = "الإيميل أو الباسورد غلط";
+    me = data.user;
+  }
+  $("#nav").style.display = ""; document.querySelector(".app").style.gridTemplateColumns = ""; start();
+}
+async function logout(){ await sb.auth.signOut(); me = null; S = {tasks:[],lectures:[],ideas:[],questions:[]}; authView(); }
+boot();
 </script>
 </body>
 </html>
