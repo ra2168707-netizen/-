@@ -87,7 +87,7 @@ const upd = async (t,id,patch,re=true) => { await save(t, {...get(t,id), ...patc
 
 const VIEWS = {day:"يومي", tasks:"المهام", lectures:"المذاكرة والمواد", ideas:"خزنة الأفكار"};
 function renderNav(){
-  $("#nav").innerHTML = "<h1>مذاكرتي 🌸</h1>" + Object.entries(VIEWS).map(([k,v]) => `<button class="${view===k?"on":""}" onclick="go('${k}')">${v}</button>`).join("") + (me ? `<div class="sm" style="margin:18px 8px 4px">${esc((me.user_metadata||{}).full_name||me.email)}</div><button onclick="logout()">خروج</button>` : "");
+  $("#nav").innerHTML = "<h1>مذاكرتي 🌸</h1>" + Object.entries(VIEWS).map(([k,v]) => `<button class="${view===k?"on":""}" onclick="go('${k}')">${v}</button>`).join("") + (me ? `<div class="sm" style="margin:18px 8px 4px">${esc((me.user_metadata||{}).full_name||"")}</div>` : "");
 }
 const go = v => { view = v; render(); };
 function render(){ renderNav(); $("#main").innerHTML = ({day:vDay,tasks:vTasks,lectures:vLectures,ideas:vIdeas})[view](); }
@@ -208,7 +208,7 @@ function vIdeas(){
 async function addIdea(){ const t = $("#it").value.trim(); if (!t) return; await save("ideas",{text:t,tags:$("#ig").value.split(/[,،]/).map(s => s.trim()).filter(Boolean)}); render(); }
 
 // ---------- الدخول والتسجيل ----------
-let me = null, mode = "in";
+let me = null;
 async function boot(){
   if (!sb){ await load(); return render(); }
   const {data} = await sb.auth.getSession(); me = data.session ? data.session.user : null;
@@ -216,31 +216,20 @@ async function boot(){
   me ? start() : authView();
 }
 async function start(){ await load(); render(); }
-function authView(msg){
+function authView(){
   $("#nav").innerHTML = ""; $("#nav").style.display = "none"; document.querySelector(".app").style.gridTemplateColumns = "1fr";
-  const su = mode === "up";
-  $("#main").innerHTML = `<div class="card" style="max-width:380px;margin:8vh auto;background:var(--beige)"><h2>أهلًا بيكي 🌸</h2><p class="sub">${su?"أول مرة؟ اكتبي بياناتك:":"اكتبي إيميلك وهنبعتلك لينك دخول."}</p>
-  ${su?`<input id="an" placeholder="اسمك" style="width:100%;margin-bottom:8px"><select id="ay" style="width:100%;margin-bottom:8px"><option value="">إنتي في سنة رابعة؟</option><option value="true">أيوه، سنة رابعة</option><option value="false">لا</option></select>`:""}
-  <input id="ae" type="email" placeholder="الإيميل" style="width:100%;margin-bottom:12px">
-  <button class="btn" style="width:100%" onclick="doAuth()">ابعتي لي لينك الدخول</button>
-  <p class="sm" style="text-align:center"><a href="#" onclick="mode='${su?"in":"up"}';authView();return false">${su?"دخلت قبل كده":"أول مرة"}</a></p>
-  <div id="ae2" class="sm" style="color:#b0455a">${msg||""}</div></div>`;
+  $("#main").innerHTML = `<div class="card" style="max-width:380px;margin:8vh auto;background:var(--beige)"><h2>أهلًا بيكي 🌸</h2><p class="sub">اكتبي اسمك وسنتك الدراسية وابدئي.</p>
+  <input id="an" placeholder="اسمك" style="width:100%;margin-bottom:8px">
+  <select id="ay" style="width:100%;margin-bottom:12px"><option value="">إنتي في سنة رابعة؟</option><option value="true">أيوه، سنة رابعة</option><option value="false">لا</option></select>
+  <button class="btn" style="width:100%" onclick="doAuth()">ابدأي</button><div id="ae2" class="sm" style="color:#b0455a;margin-top:8px"></div></div>`;
 }
 async function doAuth(){
-  const email = $("#ae").value.trim(), err = $("#ae2"), su = mode === "up";
-  if (!email) return err.textContent = "اكتبي الإيميل";
-  let data = {};
-  if (su){
-    const name = $("#an").value.trim(), y = $("#ay").value;
-    if (!name || !y) return err.textContent = "اكتبي اسمك واختاري هل إنتي في سنة رابعة";
-    data = {full_name:name,is_fourth_year:y==="true"};
-  }
-  err.style.color = "var(--mute)"; err.textContent = "ثانية…";
-  const {error} = await sb.auth.signInWithOtp({email,options:{data,shouldCreateUser:su,emailRedirectTo:location.origin+location.pathname}});
-  if (error){ err.style.color = "#b0455a"; return err.textContent = su ? "مشكلة: "+error.message : "مفيش حساب بالإيميل ده. جرّبي «أول مرة»."; }
-  $("#main").innerHTML = `<div class="card" style="max-width:380px;margin:8vh auto;background:var(--blue)"><h2>اتبعت ✉️</h2><p>افتحي إيميلك (وشوفي الـ Spam كمان) ودوسي على اللينك، وهتدخلي على طول.</p></div>`;
+  const name = $("#an").value.trim(), y = $("#ay").value, err = $("#ae2");
+  if (!name || !y) return err.textContent = "اكتبي اسمك واختاري هل إنتي في سنة رابعة";
+  const {data,error} = await sb.auth.signInAnonymously({options:{data:{full_name:name,is_fourth_year:y==="true"}}});
+  if (error) return err.textContent = "مشكلة: "+error.message;
+  me = data.user; $("#nav").style.display = ""; document.querySelector(".app").style.gridTemplateColumns = ""; start();
 }
-async function logout(){ await sb.auth.signOut(); me = null; S = {tasks:[],lectures:[],ideas:[],questions:[]}; authView(); }
 boot();
 </script>
 </body>
