@@ -41,11 +41,27 @@ dialog::backdrop{background:#4a445855}
 .opt{display:block;width:100%;text-align:right;margin:6px 0;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:#fff;font:inherit;color:var(--ink);cursor:pointer}
 .opt.ok{background:var(--ok)}.opt.no{background:var(--bad)}
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:14px;display:none}
-@media(max-width:720px){.app{grid-template-columns:1fr}nav{position:static;height:auto;display:flex;overflow-x:auto;gap:4px;padding:10px}nav h1{display:none}nav button{white-space:nowrap;width:auto}main{padding:16px}}
+@media(max-width:720px){.app{grid-template-columns:1fr;grid-template-rows:auto 1fr}nav{position:static;height:auto;display:flex;overflow-x:auto;gap:4px;padding:10px}nav h1{display:none}nav button{white-space:nowrap;width:auto}main{padding:16px}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+
+:root{--bg:#fff;--beige:#f3effb;--pink:#f3effb;--blue:#f3effb;--lav:#e3daf6;--line:#e6def5}
+.app{display:block}
+#top{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:10px 16px}
+#top button{border:0;background:var(--lav);border-radius:12px;font-size:22px;width:44px;height:44px;cursor:pointer;color:var(--ink)}
+#top b{font-size:18px}
+nav,nav{position:fixed;top:0;right:0;height:100vh;width:270px;z-index:20;background:#fff;box-shadow:-6px 0 24px #4a445822;transform:translateX(105%);transition:transform .2s;display:block;overflow:auto;padding:22px 14px}
+nav.open{transform:none}
+nav h1{display:block}
+nav button{width:100%;white-space:normal;font-size:16px}
+#veil{position:fixed;inset:0;background:#4a445844;z-index:15;display:none}
+main{margin:0 auto}
+.chip.on{background:var(--lav);border-color:var(--lav)}
+@media(max-width:720px){nav{position:fixed;height:100vh;display:block;overflow:auto;padding:22px 14px}nav h1{display:block}nav button{width:100%}.app{display:block}}
+@media(prefers-reduced-motion:reduce){nav{transition:none}}
 </style>
 </head>
 <body>
+<div id="top"><button onclick="toggleMenu()" aria-label="القائمة">☰</button><b id="ttl"></b></div><div id="veil" onclick="toggleMenu()"></div>
 <div class="app"><nav id="nav"></nav><main id="main"></main></div>
 <dialog id="dlg"></dialog><div id="toast"></div>
 <script>
@@ -53,6 +69,7 @@ dialog::backdrop{background:#4a445855}
 const SUPABASE_URL = "https://wlaeekrkdwomqxwhpcyd.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_U1IuWflw-dgGqWkHsR0QDA_25RH3iJV";
 // ================================================================================
+const GEMINI_KEY = "AQ.Ab8RN6JI_0Z9FH-sexU8Dbp1T8DP8PhJuitP7u1dYe0sy6OgbA";
 const sb = SUPABASE_URL ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 const SUBJECTS = ["Pharmacology","Medical Microbiology","Clinical Pharmacy","Clinical Pharmacokinetics","Nutrition","Pharmaceutical Technology","تشريعات وإدارة وتسجيل وأخلاقيات المهنة"];
 const STATUS = {new:"لسه",started:"بدأت",review:"محتاجة مراجعة",done:"خلصت"};
@@ -62,7 +79,8 @@ let S = {tasks:[],lectures:[],ideas:[],questions:[]}, view = "day", filter = "al
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const toast = m => { const t = $("#toast"); t.textContent = m; t.style.display = "block"; setTimeout(() => t.style.display = "none", 3200); };
-const today = () => new Date().toISOString().slice(0,10);
+const fmt = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+const today = () => fmt(new Date());
 
 async function load(){
   for (const t of T){
@@ -85,57 +103,75 @@ async function del(t, id){
 const get = (t,id) => S[t].find(x => x.id === id);
 const upd = async (t,id,patch,re=true) => { await save(t, {...get(t,id), ...patch}); if (re) render(); };
 
-const VIEWS = {day:"يومي", tasks:"المهام", lectures:"المذاكرة والمواد", ideas:"خزنة الأفكار"};
+const VIEWS = {day:"يومي", subjects:"المواد", tasks:"التاسكات والأسايمنتات"};
+let curSub = null;
+function toggleMenu(){ $("#nav").classList.toggle("open"); $("#veil").style.display = $("#nav").classList.contains("open") ? "block" : "none"; }
 function renderNav(){
   $("#nav").innerHTML = "<h1>مذاكرتي 🌸</h1>" + Object.entries(VIEWS).map(([k,v]) => `<button class="${view===k?"on":""}" onclick="go('${k}')">${v}</button>`).join("") + (me ? `<div class="sm" style="margin:18px 8px 4px">${esc((me.user_metadata||{}).full_name||"")}</div>` : "");
 }
-const go = v => { view = v; render(); };
-function render(){ renderNav(); $("#main").innerHTML = ({day:vDay,tasks:vTasks,lectures:vLectures,ideas:vIdeas})[view](); }
+const go = v => { view = v; curSub = null; $("#nav").classList.remove("open"); $("#veil").style.display = "none"; render(); };
+function render(){
+  renderNav();
+  $("#ttl").textContent = view==="subjects" && curSub ? curSub : VIEWS[view];
+  $("#main").innerHTML = ({day:vDay,subjects:vSubjects,tasks:vTasks})[view]();
+}
 
-// ---------- يومي ----------
+// ---------- يومي + التاسكات ----------
+function taskRow(t){ return `<div class="card row"><input type="checkbox" ${t.done?"checked":""} onchange="upd('tasks','${t.id}',{done:this.checked})"><span class="${t.done?"done":""}" style="flex:1">${esc(t.title)}</span>${t.deadline?`<span class="tag ${!t.done&&t.deadline<today()?"late":""}">${esc(t.deadline)}</span>`:""}<button class="btn ghost" onclick="del('tasks','${t.id}')">حذف</button></div>`; }
 function vDay(){
-  const rank = {high:0,mid:1,low:2};
-  const pend = S.tasks.filter(t => !t.done).sort((a,b) => rank[a.priority]-rank[b.priority] || (a.deadline||"9").localeCompare(b.deadline||"9"));
-  const rev = S.lectures.filter(l => l.status === "review" || l.status === "started");
-  const items = [...pend.map(t => ({txt:t.title, k:"مهمة", d:t.deadline})), ...rev.map(l => ({txt:l.subject+" — "+l.title, k:STATUS[l.status]}))].slice(0,3);
-  const soon = pend.filter(t => t.deadline && t.deadline <= new Date(Date.now()+3*864e5).toISOString().slice(0,10));
-  const td = S.tasks.filter(t => t.done).length, ld = S.lectures.filter(l => l.status === "done").length;
-  const pct = (a,b) => b ? Math.round(a/b*100) : 0;
-  return `<h2>يومك النهارده</h2><p class="sub">ابدئي بأهم ٣ حاجات بس.</p>
-  <div class="top3">${items.length ? items.map(i => `<div class="card"><b>${esc(i.txt)}</b><div class="sm">${esc(i.k)}${i.d?" · "+esc(i.d):""}</div></div>`).join("") : `<div class="card">مفيش حاجة لسه — ضيفي مهمة أو محاضرة.</div>`}</div>
-  <div class="card"><b>مواعيدها قربت</b>${soon.length ? soon.map(t => `<div>${esc(t.title)} <span class="tag late">${esc(t.deadline)}</span></div>`).join("") : `<div class="sm">مفيش مواعيد قريبة 🎉</div>`}</div>
-  <div class="card"><b>خلص وإيه اللي لسه</b>
-   <div class="sm">المهام: ${td} من ${S.tasks.length}</div><div class="bar"><i style="width:${pct(td,S.tasks.length)}%"></i></div>
-   <div class="sm" style="margin-top:8px">المحاضرات: ${ld} من ${S.lectures.length}</div><div class="bar"><i style="width:${pct(ld,S.lectures.length)}%"></i></div></div>`;
+  const td = today(), soon = fmt(new Date(Date.now()+3*864e5));
+  const now = S.tasks.filter(t => t.deadline===td || (!t.done && t.deadline && t.deadline<td));
+  const next = S.tasks.filter(t => !t.done && t.deadline>td && t.deadline<=soon);
+  return `<h2>يومي</h2><p class="sub">${new Date().toLocaleDateString("ar-EG",{weekday:"long",day:"numeric",month:"long"})}</p>
+  <button class="btn" onclick="exportReminders()" style="margin-bottom:12px">🔔 فعّلي التذكيرات في تقويم موبايلي</button>
+  <div class="card row"><input id="dq" placeholder="إيه اللي عايزة تعمليه النهارده؟" style="flex:1"><button class="btn" onclick="addDay()">إضافة</button></div>
+  ${now.map(taskRow).join("") || `<p class="sm">مفيش حاجة النهارده 🎉</p>`}
+  ${next.length ? `<h3 style="margin:18px 0 8px">قريب</h3>`+next.map(taskRow).join("") : ""}`;
 }
-
-// ---------- المهام ----------
+async function addDay(){ const t = $("#dq").value.trim(); if (!t) return; await save("tasks",{title:t,deadline:today(),priority:"mid",done:false,subtasks:[]}); render(); }
 function vTasks(){
-  const rank = {high:0,mid:1,low:2};
-  const list = [...S.tasks].sort((a,b) => a.done-b.done || rank[a.priority]-rank[b.priority]);
-  return `<h2>المهام</h2><p class="sub">كل التاسكات في مكان واحد.</p>
-  <div class="card row"><input id="tt" placeholder="المهمة" style="flex:1"><input id="td" type="date"><select id="tp"><option value="high">أولوية عالية</option><option value="mid" selected>متوسطة</option><option value="low">عادية</option></select><button class="btn" onclick="addTask()">إضافة</button></div>
-  ${list.map(t => { const late = !t.done && t.deadline && t.deadline < today(); const st = t.subtasks || [];
-   return `<div class="card"><div class="row"><input type="checkbox" ${t.done?"checked":""} onchange="upd('tasks','${t.id}',{done:this.checked})">
-   <span class="${t.done?"done":""}" style="flex:1">${esc(t.title)}</span>
-   <span class="tag ${t.priority==="high"?"hi":"mid"}">${PRI[t.priority]}</span>${t.deadline?`<span class="tag ${late?"late":""}">${late?"متأخرة · ":""}${esc(t.deadline)}</span>`:""}
-   <button class="btn ghost" onclick="del('tasks','${t.id}')">حذف</button></div>
-   ${st.map((s,i) => `<div style="margin-inline-start:28px"><input type="checkbox" ${s.done?"checked":""} onchange="togSub('${t.id}',${i})"> <span class="${s.done?"done":""}">${esc(s.t)}</span></div>`).join("")}
-   <div class="row" style="margin:8px 28px 0"><input placeholder="خطوة صغيرة" id="s${t.id}" style="flex:1"><button class="btn blue" onclick="addSub('${t.id}')">+ خطوة</button></div></div>`; }).join("") || `<p class="sm">لسه مفيش مهام.</p>`}`;
+  const list = [...S.tasks].sort((a,b) => a.done-b.done || (a.deadline||"9").localeCompare(b.deadline||"9"));
+  return `<h2>التاسكات والأسايمنتات</h2><p class="sub">المطلوب منك من الدكاترة أو المواد، مع ميعاد التسليم.</p>
+  <button class="btn" onclick="exportReminders()" style="margin-bottom:12px">🔔 فعّلي التذكيرات في تقويم موبايلي</button>
+  <div class="card row"><input id="tt" placeholder="المطلوب" style="flex:1"><input id="td" type="date"><button class="btn" onclick="addTask()">إضافة</button></div>
+  ${list.map(taskRow).join("") || `<p class="sm">لسه مفيش حاجة.</p>`}`;
 }
-async function addTask(){ const t = $("#tt").value.trim(); if (!t) return toast("اكتبي اسم المهمة"); await save("tasks",{title:t,deadline:$("#td").value||null,priority:$("#tp").value,done:false,subtasks:[]}); render(); }
-async function addSub(id){ const v = $("#s"+id).value.trim(); if (!v) return; const t = get("tasks",id); upd("tasks",id,{subtasks:[...(t.subtasks||[]),{t:v,done:false}]}); }
-async function togSub(id,i){ const t = get("tasks",id); const s = t.subtasks.map((x,j) => j===i?{...x,done:!x.done}:x); upd("tasks",id,{subtasks:s}); }
+async function addTask(){ const t = $("#tt").value.trim(); if (!t) return toast("اكتبي المطلوب"); await save("tasks",{title:t,deadline:$("#td").value||null,priority:"mid",done:false,subtasks:[]}); render(); }
 
 // ---------- المذاكرة والمواد ----------
-function vLectures(){
-  const list = S.lectures.filter(l => filter==="all" || l.subject===filter);
-  return `<h2>المواد والمحاضرات</h2><p class="sub">اختاري مادة، وافتحي أي محاضرة عشان تذاكري بمساعدة الـ AI.</p>
-  <div class="row" style="margin-bottom:14px"><button class="chip ${filter==="all"?"on":""}" onclick="filter='all';render()">الكل</button>${SUBJECTS.map(s => `<button class="chip ${filter===s?"on":""}" onclick="filter=this.dataset.s;render()" data-s="${esc(s)}">${esc(s)}</button>`).join("")}</div>
-  <div class="card row"><select id="ls">${SUBJECTS.map(s => `<option ${filter===s?"selected":""}>${esc(s)}</option>`).join("")}</select><input id="lt" placeholder="اسم المحاضرة الجديدة" style="flex:1"><button class="btn" onclick="addLec()">إضافة</button></div>
-  ${list.map(l => `<div class="card row" style="cursor:pointer" onclick="openLec('${l.id}')"><b style="flex:1">${esc(l.title)}</b><span class="tag">${esc(l.subject)}</span><span class="tag mid">${STATUS[l.status]}</span><span class="sm">${S.questions.filter(x => x.lecture_id===l.id).length} سؤال</span></div>`).join("") || `<p class="sm">ضيفي أول محاضرة من فوق.</p>`}`;
+
+// ---------- تذكيرات في تقويم الموبايل (.ics): الليلة اللي قبل الميعاد 9 م، وصباح اليوم 8 ص ----------
+function exportReminders(){
+  const items = S.tasks.filter(t => !t.done && t.deadline);
+  if (!items.length) return toast("مفيش مواعيد تتحط في التقويم");
+  const esc2 = s => String(s).replace(/[\\,;]/g, m => "\\"+m).replace(/\n/g," ");
+  const ymd = d => d.replace(/-/g,"");
+  const nxt = d => { const x = new Date(d+"T00:00:00"); x.setDate(x.getDate()+1); return ymd(fmt(x)); };
+  const stamp = new Date().toISOString().replace(/[-:]/g,"").slice(0,15)+"Z";
+  const o = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//mozakerty//AR","CALSCALE:GREGORIAN"];
+  for (const t of items){
+    const alarm = tr => ["BEGIN:VALARM","ACTION:DISPLAY","DESCRIPTION:"+esc2(t.title),"TRIGGER:"+tr,"END:VALARM"];
+    o.push("BEGIN:VEVENT","UID:"+t.id+"@mozakerty","DTSTAMP:"+stamp,"DTSTART;VALUE=DATE:"+ymd(t.deadline),"DTEND;VALUE=DATE:"+nxt(t.deadline),"SUMMARY:"+esc2(t.title),...alarm("-PT3H"),...alarm("PT8H"),"END:VEVENT");
+  }
+  o.push("END:VCALENDAR");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([o.join("\r\n")],{type:"text/calendar"})); a.download = "mozakerty.ics"; a.click();
+  toast("افتحي الملف وهيتضاف في تقويمك ✅");
 }
-async function addLec(){ const t = $("#lt").value.trim(); if (!t) return toast("اكتبي اسم المحاضرة"); await save("lectures",{subject:$("#ls").value,title:t,status:"new",difficulty:2,summary:"",pdf_url:"",video_url:"",record_url:"",key_points:""}); render(); }
+
+const subjectsList = () => S.ideas.filter(i => (i.tags||[]).includes("subject"));
+function vSubjects(){
+  if (!curSub){
+    return `<h2>المواد</h2><p class="sub">ضيفي موادك، وافتحي أي مادة عشان تشوفي محاضراتها.</p>
+    <div class="card row"><input id="sn" placeholder="اسم المادة" style="flex:1"><button class="btn" onclick="addSub()">إضافة</button></div>
+    ${subjectsList().map(s => `<div class="card row" style="cursor:pointer" onclick="curSub=this.dataset.n;render()" data-n="${esc(s.text)}"><b style="flex:1">${esc(s.text)}</b><span class="sm">${S.lectures.filter(l => l.subject===s.text).length} محاضرة</span><button class="btn ghost" onclick="event.stopPropagation();if(confirm('تمسحي المادة؟'))del('ideas','${s.id}')">حذف</button></div>`).join("") || `<p class="sm">لسه مفيش مواد، ضيفي أول مادة من فوق.</p>`}`;
+  }
+  const list = S.lectures.filter(l => l.subject===curSub);
+  return `<button class="btn ghost" onclick="curSub=null;render()" style="margin-bottom:12px">← المواد</button>
+  <div class="card row"><input id="lt" placeholder="اسم المحاضرة الجديدة" style="flex:1"><button class="btn" onclick="addLec()">إضافة</button></div>
+  ${list.map(l => `<div class="card row" style="cursor:pointer" onclick="openLec('${l.id}')"><b style="flex:1">${esc(l.title)}</b><span class="tag mid">${STATUS[l.status]}</span><span class="sm">${S.questions.filter(x => x.lecture_id===l.id).length} سؤال</span></div>`).join("") || `<p class="sm">ضيفي أول محاضرة من فوق.</p>`}`;
+}
+async function addSub(){ const n = $("#sn").value.trim(); if (!n) return toast("اكتبي اسم المادة"); await save("ideas",{text:n,tags:["subject"]}); render(); }
+async function addLec(){ const t = $("#lt").value.trim(); if (!t) return toast("اكتبي اسم المحاضرة"); await save("lectures",{subject:curSub,title:t,status:"new",difficulty:2,summary:"",pdf_url:"",video_url:"",record_url:"",key_points:""}); render(); }
 
 // ---------- الاختبار ----------
 let qs = [], qi = 0, score = 0;
@@ -170,26 +206,44 @@ function openLec(id){
   <div class="row"><button class="btn blue" onclick="openQuiz('${id}')">ابدئي الاختبار (${n})</button><button class="btn pink" onclick="addQ('${id}')">+ سؤال بإيدي</button><button class="btn ghost" onclick="if(confirm('تمسحي المحاضرة؟')){del('lectures','${id}');$('#dlg').close()}">حذف</button><button class="btn ghost" onclick="$('#dlg').close()">قفل</button></div>`;
   $("#dlg").showModal();
 }
+const G = "https://generativelanguage.googleapis.com";
+const SYS = "إنتي مدرّسة خصوصي لطالبة في الفرقة الرابعة صيدلة في مصر. اشرحي بالعامية المصرية البسيطة، واكتبي المصطلحات الطبية والأدوية بالإنجليزي. لو المحتوى ريكورد أو فيديو: ركّزي على اللي الدكتور شدّد عليه وكرّره وعلى أمثلته. اعتمدي على المحتوى المرفوع بس، ولو المعلومة مش موجودة فيه قولي كده.";
+const TASKS = {
+  explain: "اشرحي المحتوى ده خطوة خطوة بأسلوب بسيط، ووضّحي أي حاجة صعبة بمثال.",
+  summarize: "لخّصي المحتوى في نقط، وفي الآخر اكتبي قسم 'اللي غالبًا هييجي في الامتحان' واللي الدكتور ركّز عليه.",
+  quiz: 'اعملي 8 أسئلة اختيار من متعدد (4 اختيارات) على أهم أجزاء المحتوى وبنفس أسلوب الدكتور وأمثلته لو موجودة. رجّعي JSON array بس، كل عنصر: {"q":"","options":["","","",""],"answer":0,"explanation":""} و answer رقم الإجابة الصح من 0 لـ 3.'
+};
+async function gUpload(f){
+  const mime = f.type || "application/pdf";
+  const st = await fetch(G+"/upload/v1beta/files", {method:"POST", headers:{"x-goog-api-key":GEMINI_KEY,"X-Goog-Upload-Protocol":"resumable","X-Goog-Upload-Command":"start","X-Goog-Upload-Header-Content-Length":String(f.size),"X-Goog-Upload-Header-Content-Type":mime,"Content-Type":"application/json"}, body:JSON.stringify({file:{display_name:"lecture"}})});
+  const url = st.headers.get("x-goog-upload-url"); if (!url) throw new Error("الرفع لجوجل فشل");
+  const up = await fetch(url, {method:"POST", headers:{"X-Goog-Upload-Offset":"0","X-Goog-Upload-Command":"upload, finalize"}, body:f});
+  let file = (await up.json()).file;
+  while (file && file.state === "PROCESSING"){ await new Promise(r => setTimeout(r,3000)); file = await (await fetch(G+"/v1beta/"+file.name, {headers:{"x-goog-api-key":GEMINI_KEY}})).json(); }
+  if (!file || file.state === "FAILED") throw new Error("مقدرتش أقرا الملف ده");
+  return {file_data:{mime_type:mime,file_uri:file.uri}};
+}
 async function aiRun(id,task){
-  if (!sb) return toast("اربطي Supabase الأول");
   const f = $("#aif").files[0], text = $("#ait").value.trim(), question = $("#aiq").value.trim();
   if (!f && !text) return toast("ارفعي ملف أو الصقي نص الأول");
   if (task==="ask" && !question) return toast("اكتبي سؤالك");
   const out = $("#aiout"); out.style.display = "block"; out.textContent = "بشتغل… الملفات الكبيرة بتاخد وقت ⏳";
-  let path = null;
-  if (f){
-    path = me.id+"/"+id+"-"+Date.now()+"-"+f.name.replace(/[^\w.]/g,"_");
-    const up = await sb.storage.from("records").upload(path,f,{contentType:f.type});
-    if (up.error){ out.textContent = "الرفع فشل: "+up.error.message; return; }
-  }
-  const {data,error} = await sb.functions.invoke("ai-helper",{body:{task,text,question,path,mime:f?(f.type||"application/pdf"):null}});
-  if (error || !data || data.error){ out.textContent = "حصلت مشكلة: "+(data&&data.error||(error&&error.message)||"غير معروفة"); return; }
-  if (task==="quiz"){
-    for (const x of data.questions) await save("questions",{lecture_id:id,q:x.q,options:x.options,answer:x.answer,explanation:x.explanation||""});
-    out.textContent = "اتعملت "+data.questions.length+" سؤال ✅ اضغطي «ابدئي الاختبار».";
-  } else {
-    aiText = data.text; out.innerHTML = esc(aiText)+`<div style="margin-top:10px"><button class="btn blue" onclick="saveNote('${id}')">احفظيه في المحاضرة</button></div>`;
-  }
+  try{
+    const parts = [];
+    if (f){ if ((f.type||"").startsWith("text/") || /\.txt$/i.test(f.name)) parts.push({text:await f.text()}); else parts.push(await gUpload(f)); }
+    if (text) parts.push({text});
+    parts.push({text: task==="ask" ? "جاوبي على السؤال ده من المحتوى: "+question : TASKS[task]+(question?"\nملاحظة من الطالبة: "+question:"")});
+    const body = {system_instruction:{parts:[{text:SYS}]}, contents:[{parts}]};
+    if (task==="quiz") body.generationConfig = {responseMimeType:"application/json"};
+    const r = await fetch(G+"/v1beta/models/gemini-flash-latest:generateContent", {method:"POST", headers:{"Content-Type":"application/json","x-goog-api-key":GEMINI_KEY}, body:JSON.stringify(body)});
+    const j = await r.json(); if (!r.ok) throw new Error((j.error&&j.error.message)||"خطأ من الـ AI");
+    const res = (j.candidates&&j.candidates[0].content.parts||[]).map(p => p.text||"").join("");
+    if (task==="quiz"){
+      const qs2 = JSON.parse(res);
+      for (const x of qs2) await save("questions",{lecture_id:id,q:x.q,options:x.options,answer:x.answer,explanation:x.explanation||""});
+      out.textContent = "اتعملت "+qs2.length+" سؤال ✅ اضغطي «ابدئي الاختبار».";
+    } else { aiText = res; out.innerHTML = esc(aiText)+`<div style="margin-top:10px"><button class="btn blue" onclick="saveNote('${id}')">احفظيه في المحاضرة</button></div>`; }
+  }catch(e){ out.textContent = "حصلت مشكلة: "+(e.message||e); }
 }
 async function saveNote(id){ const l = get("lectures",id); await upd("lectures",id,{key_points:(l.key_points?l.key_points+"\n\n":"")+aiText},false); toast("اتحفظ ✅"); }
 
@@ -217,13 +271,13 @@ async function boot(){
   }catch(e){ $("#main").innerHTML = `<div class="card">حصلت مشكلة في فتح الموقع: ${esc(e.message||e)}</div>`; }
 }
 async function start(){
-  $("#nav").style.display = ""; document.querySelector(".app").style.gridTemplateColumns = "";
+  $("#top").style.display = ""; $("#nav").style.display = ""; document.querySelector(".app").style.gridTemplateColumns = "";
   $("#main").innerHTML = `<p class="sub">ثانية، بحمّل بياناتك…</p>`; renderNav();
   try{ await load(); }catch(e){ toast("مشكلة في تحميل البيانات: "+(e.message||e)); }
   try{ render(); }catch(e){ $("#main").innerHTML = `<div class="card">مشكلة في العرض: ${esc(e.message||e)}</div>`; }
 }
 function authView(){
-  $("#nav").innerHTML = ""; $("#nav").style.display = "none"; document.querySelector(".app").style.gridTemplateColumns = "1fr";
+  $("#nav").innerHTML = ""; $("#nav").style.display = "none"; $("#top").style.display = "none"; document.querySelector(".app").style.gridTemplateColumns = "1fr";
   $("#main").innerHTML = `<div class="card" style="max-width:380px;margin:8vh auto;background:var(--beige)"><h2>أهلًا بيكي 🌸</h2><p class="sub">اكتبي اسمك وسنتك الدراسية وابدئي.</p>
   <input id="an" placeholder="اسمك" style="width:100%;margin-bottom:8px">
   <select id="ay" style="width:100%;margin-bottom:12px"><option value="">إنتي في سنة رابعة؟</option><option value="true">أيوه، سنة رابعة</option><option value="false">لا</option></select>
