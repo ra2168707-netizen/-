@@ -262,18 +262,27 @@ const TASKS = {
   mind: 'اعملي خريطة ذهنية بسيطة لأهم نقط المحتوى، وكلمات مفتاحية مع معناها وربطها ببعض. رجّعي JSON object بس: {"center":"عنوان المحاضرة","branches":[{"title":"","points":["",""]}],"keywords":[{"term":"","meaning":"","related":["",""]}]}'
 };
 async function gUpload(f){
-  if (f.size > 3 * 1024 * 1024) throw new Error("الملف أكبر من 3 ميجابايت. حاليًا جرّبي ملفًا أصغر أو الصقي نص المحاضرة.");
   const mime = f.type || (/\.pdf$/i.test(f.name) ? "application/pdf" : "application/octet-stream");
-  const data = await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(",")[1]);reader.onerror=()=>reject(new Error("تعذرت قراءة الملف"));reader.readAsDataURL(f);});
-  const r=await fetch(G,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"upload",name:f.name,mime,data})});
-  const j=await r.json(); if(!r.ok) throw new Error(j.error||"فشل رفع الملف");
-  return {file_data:{mime_type:mime,file_uri:j.uri}};
+  // Start a resumable upload without sending the whole file through the Vercel function.
+  const start = await fetch(G,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"startUpload",name:f.name,mime,size:f.size})});
+  const sj = await start.json(); if(!start.ok) throw new Error(sj.error||"تعذّر بدء رفع الملف");
+  const uploaded = await fetch(sj.uploadUrl,{method:"POST",headers:{"X-Goog-Upload-Offset":"0","X-Goog-Upload-Command":"upload, finalize","Content-Type":mime},body:f});
+  const uj = await uploaded.json().catch(()=>({}));
+  if(!uploaded.ok) throw new Error(uj?.error?.message||"فشل رفع الملف إلى جوجل. قد يكون الملف أكبر من الحدود التي تدعمها الخدمة.");
+  let file = uj.file || uj;
+  for(let i=0; file && file.state==="PROCESSING" && i<30; i++){
+    await new Promise(r=>setTimeout(r,1500));
+    const check=await fetch(G,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"checkUpload",fileName:file.name})});
+    const cj=await check.json(); if(!check.ok) throw new Error(cj.error||"تعذّر تجهيز الملف"); file=cj;
+  }
+  if(!file?.uri || file.state==="FAILED" || file.state==="PROCESSING") throw new Error("جوجل لم يكتمل من تجهيز الملف. جرّبي ملفًا أصغر أو الصقي نص المحاضرة.");
+  return {file_data:{mime_type:mime,file_uri:file.uri}};
 }
 async function aiRun(id,task){
   const f = $("#aif").files[0], text = $("#ait").value.trim(), question = $("#aiq").value.trim();
   if (!f && !text) return toast("ارفعي ملف أو الصقي نص الأول");
   if (task==="ask" && !question) return toast("اكتبي سؤالك");
-  const out = $("#aiout"); out.style.display = "block"; out.textContent = "بشتغل… الملفات الكبيرة بتاخد وقت ⏳";
+  const out = $("#aiout"); out.style.display = "block"; out.textContent = "بشتغل… الملفات الكبيرة ممكن تاخد وقت حسب دعم الخدمة والاتصال ⏳";
   try{
     const parts = [];
     if (f){ if ((f.type||"").startsWith("text/") || /\.txt$/i.test(f.name)) parts.push({text:await f.text()}); else parts.push(await gUpload(f)); }
