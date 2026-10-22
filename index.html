@@ -103,7 +103,7 @@ async function del(t, id){
 const get = (t,id) => S[t].find(x => x.id === id);
 const upd = async (t,id,patch,re=true) => { await save(t, {...get(t,id), ...patch}); if (re) render(); };
 
-const VIEWS = {day:"يومي", subjects:"المواد", tasks:"التاسكات والأسايمنتات", progress:"تقدّمي"};
+const VIEWS = {day:"يومي", subjects:"المواد", library:"مكتبة المحاضرات", tasks:"التاسكات والأسايمنتات", progress:"تقدّمي"};
 let curSub = null;
 function toggleMenu(){ $("#nav").classList.toggle("open"); $("#veil").style.display = $("#nav").classList.contains("open") ? "block" : "none"; }
 function renderNav(){
@@ -113,7 +113,8 @@ const go = v => { view = v; curSub = null; $("#nav").classList.remove("open"); $
 function render(){
   renderNav();
   $("#ttl").textContent = view==="subjects" && curSub ? curSub : VIEWS[view];
-  $("#main").innerHTML = ({day:vDay,subjects:vSubjects,tasks:vTasks,progress:vProgress})[view]();
+  $("#main").innerHTML = ({day:vDay,subjects:vSubjects,library:vLibrary,tasks:vTasks,progress:vProgress})[view]();
+  if(view === "library") loadLibraryList();
 }
 
 // ---------- يومي + التاسكات ----------
@@ -294,6 +295,48 @@ async function aiRun(id,task){
   }catch(e){ out.textContent = "حصلت مشكلة: "+(e.message||e); }
 }
 async function saveNote(id){ const l = get("lectures",id); await upd("lectures",id,{key_points:(l.key_points?l.key_points+"\n\n":"")+aiText},false); toast("اتحفظ ✅"); }
+
+
+// ---------- مكتبة المحاضرات والمصادر: ملفات متعددة محفوظة على نفس الجهاز ----------
+let libraryDb;
+function openLibraryDB(){
+  return new Promise((resolve,reject)=>{
+    if(!window.indexedDB) return reject(new Error("المتصفح لا يدعم حفظ الملفات محليًا"));
+    const req=indexedDB.open("MozakertyLibrary",1);
+    req.onupgradeneeded=()=>{ const db=req.result; if(!db.objectStoreNames.contains("files")){ const st=db.createObjectStore("files",{keyPath:"id"}); st.createIndex("subject","subject",{unique:false}); } };
+    req.onsuccess=()=>{libraryDb=req.result;resolve(libraryDb)}; req.onerror=()=>reject(req.error);
+  });
+}
+async function libraryPut(row){ const db=libraryDb||await openLibraryDB(); return new Promise((resolve,reject)=>{const tx=db.transaction("files","readwrite");tx.objectStore("files").put(row);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);}); }
+async function libraryAll(){ const db=libraryDb||await openLibraryDB(); return new Promise((resolve,reject)=>{const r=db.transaction("files","readonly").objectStore("files").getAll();r.onsuccess=()=>resolve(r.result||[]);r.onerror=()=>reject(r.error);}); }
+async function libraryDelete(id){ const db=libraryDb||await openLibraryDB(); return new Promise((resolve,reject)=>{const tx=db.transaction("files","readwrite");tx.objectStore("files").delete(id);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);}); }
+function vLibrary(){
+  const subs=subjectsList().map(s=>s.text);
+  return `<h2>مكتبة المحاضرات والمصادر 📚</h2><p class="sub">ارفعي أكتر من ملف ونظّمي المحاضرات والكتب والفيديوهات والتسجيلات حسب المادة.</p>
+  <div class="card" style="background:var(--beige)"><label><b>المادة</b></label><select id="libsub" style="width:100%;margin:6px 0 10px"><option value="">اختاري المادة (اختياري)</option>${subs.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join("")}</select>
+  <label><b>نوع المصدر</b></label><select id="libtype" style="width:100%;margin:6px 0 10px"><option>محاضرة</option><option>كتاب</option><option>فيديو</option><option>تسجيل صوتي</option><option>ملف أو ملخص</option><option>مصدر آخر</option></select>
+  <input id="libfiles" type="file" multiple accept=".pdf,.txt,.doc,.docx,.ppt,.pptx,.epub,audio/*,video/*" style="width:100%;background:white;padding:12px">
+  <p class="sm">يمكن اختيار عدة ملفات مرة واحدة. الملفات محفوظة على هذا الجهاز والمتصفح، وليست متزامنة تلقائيًا بين الأجهزة.</p><button class="btn" onclick="uploadLibraryFiles()">حفظ الملفات في المكتبة</button></div>
+  <div class="row" style="margin:12px 0"><input id="libsearch" placeholder="ابحثي باسم الملف أو المادة" oninput="loadLibraryList()" style="flex:1"><select id="libfilter" onchange="loadLibraryList()"><option value="">كل الأنواع</option><option>محاضرة</option><option>كتاب</option><option>فيديو</option><option>تسجيل صوتي</option><option>ملف أو ملخص</option><option>مصدر آخر</option></select></div>
+  <div id="librarylist"><p class="sm">جاري تحميل الملفات…</p></div>`;
+}
+async function uploadLibraryFiles(){
+  const input=$("#libfiles"), files=[...(input?.files||[])]; if(!files.length)return toast("اختاري ملف واحد على الأقل");
+  const subject=$("#libsub").value, type=$("#libtype").value;
+  try{ for(const f of files){ await libraryPut({id:crypto.randomUUID(),name:f.name,subject,type,size:f.size,mime:f.type||"application/octet-stream",added:Date.now(),blob:f}); }
+    input.value=""; toast("اتحفظ "+files.length+" ملف في المكتبة ✅"); await loadLibraryList();
+  }catch(e){toast("مقدرتش أحفظ الملفات: "+(e.message||e));}
+}
+function prettySize(n){if(n<1024)return n+" B";if(n<1048576)return (n/1024).toFixed(1)+" KB";return (n/1048576).toFixed(1)+" MB";}
+async function loadLibraryList(){
+  const target=$("#librarylist"); if(!target)return;
+  try{const all=await libraryAll(), search=($("#libsearch")?.value||"").toLowerCase(), type=$("#libfilter")?.value||"";
+    const list=all.filter(x=>(!search||(x.name+" "+x.subject).toLowerCase().includes(search))&&(!type||x.type===type)).sort((a,b)=>b.added-a.added);
+    target.innerHTML=list.length?list.map(x=>`<div class="card row"><div style="flex:1;min-width:160px"><b>${esc(x.name)}</b><div class="sm">${esc(x.subject||"من غير مادة")} · ${esc(x.type)} · ${prettySize(x.size)}</div></div><button class="btn blue" onclick="downloadLibraryFile('${x.id}')">فتح / تنزيل</button><button class="btn ghost" onclick="removeLibraryFile('${x.id}')">حذف</button></div>`).join(""):`<div class="card sm">المكتبة فاضية لسه. ارفعي ملفاتك من فوق.</div>`;
+  }catch(e){target.innerHTML=`<div class="card">تعذّر فتح المكتبة: ${esc(e.message||e)}</div>`;}
+}
+async function downloadLibraryFile(id){const x=(await libraryAll()).find(y=>y.id===id);if(!x)return;const url=URL.createObjectURL(x.blob),a=document.createElement("a");a.href=url;a.download=x.name;a.target="_blank";a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
+async function removeLibraryFile(id){if(!confirm("تحذفي الملف من المكتبة؟"))return;await libraryDelete(id);await loadLibraryList();toast("اتحذف الملف");}
 
 // ---------- خزنة الأفكار ----------
 function ideaList(){
