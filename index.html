@@ -69,7 +69,7 @@ main{margin:0 auto}
 const SUPABASE_URL = "https://wlaeekrkdwomqxwhpcyd.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_U1IuWflw-dgGqWkHsR0QDA_25RH3iJV";
 // ================================================================================
-const GEMINI_KEY = "AQ.Ab8RN6JI_0Z9FH-sexU8Dbp1T8DP8PhJuitP7u1dYe0sy6OgbA";
+
 const sb = SUPABASE_URL ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 const SUBJECTS = ["Pharmacology","Medical Microbiology","Clinical Pharmacy","Clinical Pharmacokinetics","Nutrition","Pharmaceutical Technology","تشريعات وإدارة وتسجيل وأخلاقيات المهنة"];
 const STATUS = {new:"لسه",started:"بدأت",review:"محتاجة مراجعة",done:"خلصت"};
@@ -253,36 +253,21 @@ function openLec(id){
   <div class="row"><button class="btn blue" onclick="openQuiz('${id}')">ابدئي الاختبار (${n})</button><button class="btn pink" onclick="addQ('${id}')">+ سؤال بإيدي</button><button class="btn ghost" onclick="if(confirm('تمسحي المحاضرة؟')){del('lectures','${id}');$('#dlg').close()}">حذف</button><button class="btn ghost" onclick="$('#dlg').close()">قفل</button></div>`;
   $("#dlg").showModal();
 }
-const G = "https://generativelanguage.googleapis.com";
+const G = "/api/gemini";
 const SYS = "إنتي مدرّسة خصوصي لطالبة صيدلة في مصر. اشرحي بالعامية المصرية البسيطة، واكتبي المصطلحات الطبية والأدوية بالإنجليزي. لو المحتوى ريكورد أو فيديو: ركّزي على اللي الدكتور شدّد عليه وكرّره وعلى أمثلته. اعتمدي على المحتوى المرفوع بس، ولو المعلومة مش موجودة فيه قولي كده.";
 const TASKS = {
   explain: "اشرحي المحتوى ده بطريقة بسيطة وواضحة ومتقنة: قسّميه لأجزاء صغيرة بعناوين، ووضّحي الأفكار المهمة واربطي بينها وبين بعض، ومثّلي لأي حاجة صعبة.",
   summarize: "لخّصي المحتوى في نقط، وفي الآخر اكتبي قسم 'اللي غالبًا هييجي في الامتحان' واللي الدكتور ركّز عليه.",
-  quiz: 'اعملي أسئلة على أهم أجزاء المحتوى وبنفس أسلوب الدكتور وأمثلته لو موجودة. العدد حسب حجم المحتوى (من 5 لـ 15). نوّعي: اختيار من متعدد (4 اختيارات) وصح/خطأ (options = ["صح","خطأ"])، ورتّبيها من السهل للمتوسط للصعب. رجّعي JSON array بس، كل عنصر: {"q":"","options":[],"answer":0,"explanation":""} و answer رقم الإجابة الصح (يبدأ من 0)، والشرح يوضّح ليه الإجابة صح أو غلط.',
+  quiz: 'اعملي أسئلة على أهم أجزاء المحتوى وبنفس أسلوب الدكتور وأمثلته لو موجودة. العدد حسب حجم المحتوى (من 5 لـ 15). نوّعي: اختيار من متعدد (4 اختيارات) وصح/خطأ، ورتّبيها من السهل للمتوسط للصعب. رجّعي JSON array بس، كل عنصر: {"q":"","options":[],"answer":0,"explanation":""} و answer رقم الإجابة الصح (يبدأ من 0)، والشرح يوضّح ليه الإجابة صح أو غلط.',
   mind: 'اعملي خريطة ذهنية بسيطة لأهم نقط المحتوى، وكلمات مفتاحية مع معناها وربطها ببعض. رجّعي JSON object بس: {"center":"عنوان المحاضرة","branches":[{"title":"","points":["",""]}],"keywords":[{"term":"","meaning":"","related":["",""]}]}'
 };
 async function gUpload(f){
-  const mime = f.type || (/.mp4$|.mov$|.webm$/i.test(f.name) ? "video/mp4" : /\.pdf$/i.test(f.name) ? "application/pdf" : "application/octet-stream");
-  let st;
-  try {
-    st = await fetch(G+"/upload/v1beta/files", {method:"POST", headers:{"x-goog-api-key":GEMINI_KEY,"X-Goog-Upload-Protocol":"resumable","X-Goog-Upload-Command":"start","X-Goog-Upload-Header-Content-Length":String(f.size),"X-Goog-Upload-Header-Content-Type":mime,"Content-Type":"application/json"}, body:JSON.stringify({file:{display_name:f.name || "lecture"}})});
-  } catch(e) { throw new Error("المتصفح منع الاتصال بجوجل. جرّبي تحديث الصفحة أو فتح الموقع في Chrome."); }
-  if(!st.ok){ let msg=""; try{const j=await st.json();msg=j.error?.message||"";}catch(_){}; throw new Error("جوجل رفض بدء رفع الملف ("+st.status+"). "+(msg||"راجعي صلاحية مفتاح Gemini وإعدادات API.") ); }
-  const url = st.headers.get("x-goog-upload-url");
-  if (!url) throw new Error("جوجل لم يُرجع رابط الرفع. غالبًا مفتاح Gemini غير صالح أو إعدادات API غير مكتملة؛ جرّبي نصًا في مربع اللصق للتأكد من عمل المساعد.");
-  let up;
-  try { up = await fetch(url, {method:"POST", headers:{"X-Goog-Upload-Offset":"0","X-Goog-Upload-Command":"upload, finalize"}, body:f}); }
-  catch(e) { throw new Error("بدأ الرفع لكن الاتصال انقطع. جرّبي شبكة مستقرة وارفعي الملف مرة أخرى."); }
-  let payload={}; try{payload=await up.json();}catch(_){}
-  if(!up.ok) throw new Error("فشل إرسال الملف إلى جوجل ("+up.status+"). "+(payload.error?.message||"جرّبي ملفًا أصغر أو راجعي صلاحية المفتاح."));
-  let file=payload.file;
-  while(file && file.state==="PROCESSING"){
-    await new Promise(r=>setTimeout(r,3000));
-    const check=await fetch(G+"/v1beta/"+file.name,{headers:{"x-goog-api-key":GEMINI_KEY}});
-    const status=await check.json(); if(!check.ok) throw new Error(status.error?.message||"تعذّر تجهيز الملف لدى جوجل"); file=status.file||status;
-  }
-  if(!file || file.state==="FAILED" || !file.uri) throw new Error("جوجل لم يتمكن من قراءة الملف. جرّبي PDF أصغر أو الصقي نص المحاضرة بدلًا منه.");
-  return {file_data:{mime_type:mime,file_uri:file.uri}};
+  if (f.size > 3 * 1024 * 1024) throw new Error("الملف أكبر من 3 ميجابايت. حاليًا جرّبي ملفًا أصغر أو الصقي نص المحاضرة.");
+  const mime = f.type || (/\.pdf$/i.test(f.name) ? "application/pdf" : "application/octet-stream");
+  const data = await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(",")[1]);reader.onerror=()=>reject(new Error("تعذرت قراءة الملف"));reader.readAsDataURL(f);});
+  const r=await fetch(G,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"upload",name:f.name,mime,data})});
+  const j=await r.json(); if(!r.ok) throw new Error(j.error||"فشل رفع الملف");
+  return {file_data:{mime_type:mime,file_uri:j.uri}};
 }
 async function aiRun(id,task){
   const f = $("#aif").files[0], text = $("#ait").value.trim(), question = $("#aiq").value.trim();
@@ -296,8 +281,8 @@ async function aiRun(id,task){
     parts.push({text: task==="ask" ? "جاوبي على السؤال ده من المحتوى: "+question : TASKS[task]+(question?"\nملاحظة من الطالبة: "+question:"")});
     const body = {system_instruction:{parts:[{text:SYS}]}, contents:[{parts}]};
     if (task==="quiz" || task==="mind") body.generationConfig = {responseMimeType:"application/json"};
-    const r = await fetch(G+"/v1beta/models/gemini-flash-latest:generateContent", {method:"POST", headers:{"Content-Type":"application/json","x-goog-api-key":GEMINI_KEY}, body:JSON.stringify(body)});
-    const j = await r.json(); if (!r.ok) throw new Error((j.error&&j.error.message)||"خطأ من الـ AI");
+    const r = await fetch(G, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({action:"generate",body})});
+    const j = await r.json(); if (!r.ok) throw new Error(j.error||"خطأ من الـ AI");
     const res = (j.candidates&&j.candidates[0].content.parts||[]).map(p => p.text||"").join("");
     if (task==="mind"){ const m = JSON.parse(res); await upd("lectures",id,{transcript:JSON.stringify(m)},false); out.innerHTML = mindHtml(m); }
     else if (task==="quiz"){
