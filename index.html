@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>مذاكرتي — صيدلة سنة رابعة</title>
+<title>مذاكرتي</title>
 <link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <style>
@@ -103,7 +103,7 @@ async function del(t, id){
 const get = (t,id) => S[t].find(x => x.id === id);
 const upd = async (t,id,patch,re=true) => { await save(t, {...get(t,id), ...patch}); if (re) render(); };
 
-const VIEWS = {day:"يومي", subjects:"المواد", tasks:"التاسكات والأسايمنتات"};
+const VIEWS = {day:"يومي", subjects:"المواد", tasks:"التاسكات والأسايمنتات", progress:"تقدّمي"};
 let curSub = null;
 function toggleMenu(){ $("#nav").classList.toggle("open"); $("#veil").style.display = $("#nav").classList.contains("open") ? "block" : "none"; }
 function renderNav(){
@@ -113,7 +113,7 @@ const go = v => { view = v; curSub = null; $("#nav").classList.remove("open"); $
 function render(){
   renderNav();
   $("#ttl").textContent = view==="subjects" && curSub ? curSub : VIEWS[view];
-  $("#main").innerHTML = ({day:vDay,subjects:vSubjects,tasks:vTasks})[view]();
+  $("#main").innerHTML = ({day:vDay,subjects:vSubjects,tasks:vTasks,progress:vProgress})[view]();
 }
 
 // ---------- يومي + التاسكات ----------
@@ -158,6 +158,46 @@ function exportReminders(){
   toast("افتحي الملف وهيتضاف في تقويمك ✅");
 }
 
+
+// ---------- النتايج والتقدّم ----------
+const pct = (a,b) => b ? Math.round(a/b*100) : 0;
+const results = () => S.ideas.filter(i => (i.tags||[]).includes("result")).map(i => { try { return JSON.parse(i.text); } catch(e){ return null; } }).filter(Boolean);
+const avgOf = rs => pct(rs.reduce((s,x) => s+x.score,0), rs.reduce((s,x) => s+x.total,0));
+function lecAvg(id){ const r = results().filter(x => x.lid===id); return r.length ? avgOf(r) : null; }
+function wrongCounts(subject){ const c = {}; results().filter(x => !subject || x.subject===subject).forEach(x => (x.wrong||[]).forEach(id => c[id] = (c[id]||0)+1)); return c; }
+function wrongQs(subject){ const c = wrongCounts(subject); return S.questions.filter(q => c[q.id]); }
+function mindHtml(m){
+  const br = (m.branches||[]).map(b => `<div class="card" style="background:var(--beige);margin:0"><b>${esc(b.title)}</b><ul style="margin:6px 0 0;padding-inline-start:20px">${(b.points||[]).map(p => `<li>${esc(p)}</li>`).join("")}</ul></div>`).join("");
+  const kw = (m.keywords||[]).map(k => `<tr><td><b>${esc(k.term)}</b></td><td>${esc(k.meaning)}</td><td class="sm">${esc((k.related||[]).join("، "))}</td></tr>`).join("");
+  return `<div style="text-align:center;margin:10px 0"><span class="tag" style="font-size:16px;padding:6px 18px">${esc(m.center)}</span></div><div style="display:grid;gap:8px">${br}</div><h4>الكلمات المفتاحية</h4><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><tr class="sm"><td>المصطلح</td><td>معناه</td><td>مرتبط بـ</td></tr>${kw}</table></div>`;
+}
+const mindBlock = l => { try { const m = JSON.parse(l.transcript); return m && m.center ? `<div class="card"><b>🗺️ الخريطة الذهنية والكلمات المفتاحية</b>${mindHtml(m)}</div>` : ""; } catch(e){ return ""; } };
+function reviewBar(list){
+  const qn = S.questions.filter(q => list.some(l => l.id===q.lecture_id)).length, wn = wrongQs(curSub).length;
+  const weak = list.filter(l => { const a = lecAvg(l.id); return l.status==="review" || (a!==null && a<60); });
+  return `<div class="row" style="margin-bottom:12px"><button class="btn blue" onclick="subjQuiz()">اختبار شامل (${qn})</button><button class="btn" onclick="wrongQuiz()">أعيدي أسئلتي الغلط (${wn})</button></div>`+(weak.length ? `<div class="card"><b>مراجعة نهائية: ركّزي على</b>${weak.map(l => `<div class="row" style="cursor:pointer;margin-top:6px" onclick="openLec('${l.id}')"><span style="flex:1">${esc(l.title)}</span><span class="tag late">${lecAvg(l.id)===null?"محتاجة مراجعة":lecAvg(l.id)+"%"}</span></div>`).join("")}</div>` : "");
+}
+function vProgress(){
+  const all = S.lectures, done = all.filter(l => l.status==="done").length;
+  const subs = subjectsList().map(s => s.text), rs = results().sort((a,b) => b.at-a.at);
+  const bar = (a,b) => `<div class="bar"><i style="width:${pct(a,b)}%"></i></div>`;
+  const strong = [], weak = [];
+  all.forEach(l => { const a = lecAvg(l.id); if (a===null) return; if (a>=75) strong.push(l.title+" ("+a+"%)"); else if (a<60) weak.push(l.title+" ("+a+"%)"); });
+  const rep = Object.entries(wrongCounts()).filter(([,n]) => n>=2).map(([id]) => get("questions",id)).filter(Boolean);
+  const todo = all.filter(l => { const a = lecAvg(l.id); return l.status==="new" || l.status==="review" || (a!==null && a<60); }).slice(0,3);
+  const l3 = rs.slice(0,3), p3 = rs.slice(3,6);
+  const trend = l3.length && p3.length ? (avgOf(l3) > avgOf(p3) ? "بتتحسّني ↗" : avgOf(l3) < avgOf(p3) ? "النتايج نازلة شوية ↘ راجعي" : "ثابتة") : "محتاجة اختبارين تلاتة كمان عشان نعرف";
+  const li = a => a.length ? a.map(x => `<div>• ${esc(x)}</div>`).join("") : `<div class="sm">لسه مفيش بيانات كفاية</div>`;
+  const nm = x => x.lid ? ((get("lectures",x.lid)||{}).title||"") : (x.subject||"")+" (شامل)";
+  return `<h2>تقدّمي</h2><p class="sub">كل اللي خلّصتيه ومستواك في مكان واحد.</p>
+  <div class="card"><b>الإجمالي: ${pct(done,all.length)}%</b><div class="sm">${done} محاضرة خلصت من ${all.length}</div>${bar(done,all.length)}</div>
+  ${subs.map(n => { const ls = all.filter(l => l.subject===n), d = ls.filter(l => l.status==="done").length, s = ls.filter(l => l.status==="started"||l.status==="review").length; return `<div class="card"><b>${esc(n)}: ${pct(d,ls.length)}%</b><div class="sm">خلصت ${d} · شغالة ${s} · لسه ${ls.length-d-s}</div>${bar(d,ls.length)}</div>`; }).join("")}
+  <div class="card"><b>🎯 توصياتي ليكي</b>${li(todo.map(l => l.subject+" — "+l.title))}</div>
+  <div class="card"><b>💪 نقاط القوة</b>${li(strong)}<b style="display:block;margin-top:10px">⚠️ نقاط الضعف</b>${li(weak)}</div>
+  <div class="card"><b>🔁 أسئلة بتغلطي فيها كتير</b>${li(rep.map(q => q.q))}</div>
+  <div class="card"><b>📒 سجل المذاكرة</b><div class="sm">محاضرات اتذاكرت: ${done} · اختبارات اتحلّت: ${rs.length} · مستواك: ${trend}</div>${rs.slice(0,6).map(x => `<div class="row" style="margin-top:6px"><span style="flex:1">${esc(nm(x))}</span><span class="tag">${x.score}/${x.total}</span><span class="sm">${new Date(x.at).toLocaleDateString("ar-EG")}</span></div>`).join("")}</div>`;
+}
+
 const subjectsList = () => S.ideas.filter(i => (i.tags||[]).includes("subject"));
 function vSubjects(){
   if (!curSub){
@@ -166,7 +206,7 @@ function vSubjects(){
     ${subjectsList().map(s => `<div class="card row" style="cursor:pointer" onclick="curSub=this.dataset.n;render()" data-n="${esc(s.text)}"><b style="flex:1">${esc(s.text)}</b><span class="sm">${S.lectures.filter(l => l.subject===s.text).length} محاضرة</span><button class="btn ghost" onclick="event.stopPropagation();if(confirm('تمسحي المادة؟'))del('ideas','${s.id}')">حذف</button></div>`).join("") || `<p class="sm">لسه مفيش مواد، ضيفي أول مادة من فوق.</p>`}`;
   }
   const list = S.lectures.filter(l => l.subject===curSub);
-  return `<button class="btn ghost" onclick="curSub=null;render()" style="margin-bottom:12px">← المواد</button>
+  return `<button class="btn ghost" onclick="curSub=null;render()" style="margin-bottom:12px">← المواد</button>${reviewBar(list)}
   <div class="card row"><input id="lt" placeholder="اسم المحاضرة الجديدة" style="flex:1"><button class="btn" onclick="addLec()">إضافة</button></div>
   ${list.map(l => `<div class="card row" style="cursor:pointer" onclick="openLec('${l.id}')"><b style="flex:1">${esc(l.title)}</b><span class="tag mid">${STATUS[l.status]}</span><span class="sm">${S.questions.filter(x => x.lecture_id===l.id).length} سؤال</span></div>`).join("") || `<p class="sm">ضيفي أول محاضرة من فوق.</p>`}`;
 }
@@ -174,17 +214,22 @@ async function addSub(){ const n = $("#sn").value.trim(); if (!n) return toast("
 async function addLec(){ const t = $("#lt").value.trim(); if (!t) return toast("اكتبي اسم المحاضرة"); await save("lectures",{subject:curSub,title:t,status:"new",difficulty:2,summary:"",pdf_url:"",video_url:"",record_url:"",key_points:""}); render(); }
 
 // ---------- الاختبار ----------
-let qs = [], qi = 0, score = 0;
-function openQuiz(id){ qs = S.questions.filter(x => x.lecture_id===id); qi = 0; score = 0; if (!qs.length) return toast("ضيفي أسئلة الأول (+ سؤال)"); showQ(); $("#dlg").showModal(); }
+let qs = [], qi = 0, score = 0, wrong = [], qctx = {};
+function startQuiz(list,ctx){ if (!list.length) return toast("مفيش أسئلة هنا لسه"); qs = list; qi = 0; score = 0; wrong = []; qctx = ctx; showQ(); if (!$("#dlg").open) $("#dlg").showModal(); }
+const openQuiz = id => { const l = get("lectures",id); startQuiz(S.questions.filter(x => x.lecture_id===id),{lid:id,subject:l.subject}); };
+const subjQuiz = () => startQuiz(S.questions.filter(q => { const l = get("lectures",q.lecture_id); return l && l.subject===curSub; }),{lid:null,subject:curSub});
+const wrongQuiz = () => startQuiz(wrongQs(curSub),{lid:null,subject:curSub});
+function finishQuiz(){ save("ideas",{text:JSON.stringify({lid:qctx.lid,subject:qctx.subject,score,total:qs.length,at:Date.now(),wrong}),tags:["result"]}); }
 function showQ(){
   const d = $("#dlg");
-  if (qi >= qs.length){ d.innerHTML = `<h2>خلصتي 🎉</h2><p>النتيجة: ${score} من ${qs.length}</p><button class="btn" onclick="$('#dlg').close()">قفل</button>`; return; }
+  if (qi >= qs.length){ finishQuiz(); d.innerHTML = `<h2>خلصتي 🎉</h2><p>النتيجة: ${score} من ${qs.length} (${pct(score,qs.length)}%)</p><p class="sm">الأسئلة اللي غلطتي فيها اتسجّلت وتقدري تعيديها من صفحة المادة.</p><button class="btn" onclick="$('#dlg').close();render()">قفل</button>`; return; }
   const x = qs[qi];
-  d.innerHTML = `<div class="sm">سؤال ${qi+1} من ${qs.length}</div><h3>${esc(x.q)}</h3>${(x.options||[]).map((o,i) => `<button class="opt" onclick="pick(this,${i})">${esc(o)}</button>`).join("")}<div id="ex" class="sm"></div><div class="row" style="margin-top:10px"><button class="btn" id="nx" style="display:none" onclick="qi++;showQ()">التالي</button><button class="btn ghost" onclick="$('#dlg').close()">قفل</button></div>`;
+  d.innerHTML = `<div class="sm">سؤال ${qi+1} من ${qs.length}</div><h3>${esc(x.q)}</h3>${(x.options||[]).map((o,i) => `<button class="opt" onclick="pick(this,${i})">${esc(o)}</button>`).join("")}<div id="ex" class="sm"></div><div class="row" style="margin-top:10px"><button class="btn" id="nx" style="display:none" onclick="qi++;showQ()">التالي</button><button class="btn ghost" onclick="$('#dlg').close();render()">قفل</button></div>`;
 }
 function pick(b,i){ const x = qs[qi], all = [...document.querySelectorAll(".opt")]; if (all[0].disabled) return;
-  all.forEach((o,j) => { o.disabled = true; if (j===x.answer) o.classList.add("ok"); }); if (i===x.answer) score++; else b.classList.add("no");
-  $("#ex").textContent = x.explanation || ""; $("#nx").style.display = "inline-block"; }
+  all.forEach((o,j) => { o.disabled = true; if (j===x.answer) o.classList.add("ok"); });
+  if (i===x.answer) score++; else { b.classList.add("no"); wrong.push(x.id); }
+  $("#ex").innerHTML = (i===x.answer?"✅ إجابتك صح":"❌ إجابتك غلط — الصح باللون الأخضر")+"<br>"+esc(x.explanation||""); $("#nx").style.display = "inline-block"; }
 function addQ(lid){
   $("#dlg").innerHTML = `<h3>سؤال جديد</h3><textarea id="nq" placeholder="السؤال"></textarea>${[0,1,2,3].map(i => `<input id="o${i}" placeholder="اختيار ${i+1}" style="width:100%;margin-top:6px">`).join("")}
   <div class="row" style="margin:8px 0"><label>الإجابة الصح:</label><select id="na">${[1,2,3,4].map(i => `<option value="${i-1}">${i}</option>`).join("")}</select></div><input id="ne" placeholder="شرح الإجابة (اختياري)" style="width:100%">
@@ -199,19 +244,21 @@ function openLec(id){
   $("#dlg").innerHTML = `<div class="row"><h3 style="flex:1;margin:0">${esc(l.title)}</h3><select onchange="upd('lectures','${id}',{status:this.value})">${Object.entries(STATUS).map(([k,v]) => `<option value="${k}" ${l.status===k?"selected":""}>${v}</option>`).join("")}</select></div>
   <div class="card" style="background:var(--lav);margin-top:12px"><b>🤖 المساعد الذكي</b><p class="sm" style="margin:4px 0 8px">ارفعي PDF أو ريكورد أو فيديو أو نص، أو الصقي كلام، وبعدين اختاري.</p>
   <input type="file" id="aif" accept=".pdf,.txt,audio/*,video/*" style="width:100%;background:#fff"><textarea id="ait" placeholder="أو الصقي نص هنا" style="margin-top:8px;background:#fff"></textarea><input id="aiq" placeholder="سؤالك (اختياري)" style="width:100%;margin:8px 0;background:#fff">
-  <div class="row"><button class="btn pink" onclick="aiRun('${id}','explain')">اشرحي لي</button><button class="btn blue" onclick="aiRun('${id}','summarize')">لخّصي واللي مهم</button><button class="btn" style="background:#fff" onclick="aiRun('${id}','quiz')">اعملي أسئلة</button><button class="btn" style="background:#fff" onclick="aiRun('${id}','ask')">جاوبي سؤالي</button></div>
+  <div class="row"><button class="btn pink" onclick="aiRun('${id}','explain')">اشرحي لي</button><button class="btn blue" onclick="aiRun('${id}','summarize')">لخّصي واللي مهم</button><button class="btn" style="background:#fff" onclick="aiRun('${id}','quiz')">اعملي أسئلة</button><button class="btn" style="background:#fff" onclick="aiRun('${id}','ask')">جاوبي سؤالي</button><button class="btn" style="background:#fff" onclick="aiRun('${id}','mind')">خريطة ذهنية وكلمات مفتاحية</button></div>
   <div id="aiout" class="card" style="margin:12px 0 0;white-space:pre-wrap;display:none"></div></div>
   ${l.key_points ? `<div class="card" style="background:var(--beige)"><b>ملاحظاتي المحفوظة</b><div style="white-space:pre-wrap">${esc(l.key_points)}</div></div>` : ""}
+  ${mindBlock(l)}
   <details class="card"><summary>الروابط والملخص</summary><div style="margin-top:8px">${[["pdf_url","رابط PDF"],["video_url","رابط الفيديو"],["record_url","رابط الريكورد"]].map(([f,t]) => `<input placeholder="${t}" value="${esc(l[f])}" onchange="upd('lectures','${id}',{${f}:this.value},false)" style="width:100%;margin-bottom:6px">`).join("")}<textarea placeholder="ملخصي" onchange="upd('lectures','${id}',{summary:this.value},false)">${esc(l.summary)}</textarea></div></details>
   <div class="row"><button class="btn blue" onclick="openQuiz('${id}')">ابدئي الاختبار (${n})</button><button class="btn pink" onclick="addQ('${id}')">+ سؤال بإيدي</button><button class="btn ghost" onclick="if(confirm('تمسحي المحاضرة؟')){del('lectures','${id}');$('#dlg').close()}">حذف</button><button class="btn ghost" onclick="$('#dlg').close()">قفل</button></div>`;
   $("#dlg").showModal();
 }
 const G = "https://generativelanguage.googleapis.com";
-const SYS = "إنتي مدرّسة خصوصي لطالبة في الفرقة الرابعة صيدلة في مصر. اشرحي بالعامية المصرية البسيطة، واكتبي المصطلحات الطبية والأدوية بالإنجليزي. لو المحتوى ريكورد أو فيديو: ركّزي على اللي الدكتور شدّد عليه وكرّره وعلى أمثلته. اعتمدي على المحتوى المرفوع بس، ولو المعلومة مش موجودة فيه قولي كده.";
+const SYS = "إنتي مدرّسة خصوصي لطالبة صيدلة في مصر. اشرحي بالعامية المصرية البسيطة، واكتبي المصطلحات الطبية والأدوية بالإنجليزي. لو المحتوى ريكورد أو فيديو: ركّزي على اللي الدكتور شدّد عليه وكرّره وعلى أمثلته. اعتمدي على المحتوى المرفوع بس، ولو المعلومة مش موجودة فيه قولي كده.";
 const TASKS = {
-  explain: "اشرحي المحتوى ده خطوة خطوة بأسلوب بسيط، ووضّحي أي حاجة صعبة بمثال.",
+  explain: "اشرحي المحتوى ده بطريقة بسيطة وواضحة ومتقنة: قسّميه لأجزاء صغيرة بعناوين، ووضّحي الأفكار المهمة واربطي بينها وبين بعض، ومثّلي لأي حاجة صعبة.",
   summarize: "لخّصي المحتوى في نقط، وفي الآخر اكتبي قسم 'اللي غالبًا هييجي في الامتحان' واللي الدكتور ركّز عليه.",
-  quiz: 'اعملي 8 أسئلة اختيار من متعدد (4 اختيارات) على أهم أجزاء المحتوى وبنفس أسلوب الدكتور وأمثلته لو موجودة. رجّعي JSON array بس، كل عنصر: {"q":"","options":["","","",""],"answer":0,"explanation":""} و answer رقم الإجابة الصح من 0 لـ 3.'
+  quiz: 'اعملي أسئلة على أهم أجزاء المحتوى وبنفس أسلوب الدكتور وأمثلته لو موجودة. العدد حسب حجم المحتوى (من 5 لـ 15). نوّعي: اختيار من متعدد (4 اختيارات) وصح/خطأ (options = ["صح","خطأ"])، ورتّبيها من السهل للمتوسط للصعب. رجّعي JSON array بس، كل عنصر: {"q":"","options":[],"answer":0,"explanation":""} و answer رقم الإجابة الصح (يبدأ من 0)، والشرح يوضّح ليه الإجابة صح أو غلط.',
+  mind: 'اعملي خريطة ذهنية بسيطة لأهم نقط المحتوى، وكلمات مفتاحية مع معناها وربطها ببعض. رجّعي JSON object بس: {"center":"عنوان المحاضرة","branches":[{"title":"","points":["",""]}],"keywords":[{"term":"","meaning":"","related":["",""]}]}'
 };
 async function gUpload(f){
   const mime = f.type || "application/pdf";
@@ -234,11 +281,12 @@ async function aiRun(id,task){
     if (text) parts.push({text});
     parts.push({text: task==="ask" ? "جاوبي على السؤال ده من المحتوى: "+question : TASKS[task]+(question?"\nملاحظة من الطالبة: "+question:"")});
     const body = {system_instruction:{parts:[{text:SYS}]}, contents:[{parts}]};
-    if (task==="quiz") body.generationConfig = {responseMimeType:"application/json"};
+    if (task==="quiz" || task==="mind") body.generationConfig = {responseMimeType:"application/json"};
     const r = await fetch(G+"/v1beta/models/gemini-flash-latest:generateContent", {method:"POST", headers:{"Content-Type":"application/json","x-goog-api-key":GEMINI_KEY}, body:JSON.stringify(body)});
     const j = await r.json(); if (!r.ok) throw new Error((j.error&&j.error.message)||"خطأ من الـ AI");
     const res = (j.candidates&&j.candidates[0].content.parts||[]).map(p => p.text||"").join("");
-    if (task==="quiz"){
+    if (task==="mind"){ const m = JSON.parse(res); await upd("lectures",id,{transcript:JSON.stringify(m)},false); out.innerHTML = mindHtml(m); }
+    else if (task==="quiz"){
       const qs2 = JSON.parse(res);
       for (const x of qs2) await save("questions",{lecture_id:id,q:x.q,options:x.options,answer:x.answer,explanation:x.explanation||""});
       out.textContent = "اتعملت "+qs2.length+" سؤال ✅ اضغطي «ابدئي الاختبار».";
@@ -280,13 +328,13 @@ function authView(){
   $("#nav").innerHTML = ""; $("#nav").style.display = "none"; $("#top").style.display = "none"; document.querySelector(".app").style.gridTemplateColumns = "1fr";
   $("#main").innerHTML = `<div class="card" style="max-width:380px;margin:8vh auto;background:var(--beige)"><h2>أهلًا بيكي 🌸</h2><p class="sub">اكتبي اسمك وسنتك الدراسية وابدئي.</p>
   <input id="an" placeholder="اسمك" style="width:100%;margin-bottom:8px">
-  <select id="ay" style="width:100%;margin-bottom:12px"><option value="">إنتي في سنة رابعة؟</option><option value="true">أيوه، سنة رابعة</option><option value="false">لا</option></select>
+  <select id="ay" style="width:100%;margin-bottom:12px"><option value="">إنتي في أنهي فرقة؟</option><option value="1">الفرقة الأولى</option><option value="2">الفرقة الثانية</option><option value="3">الفرقة الثالثة</option><option value="4">الفرقة الرابعة</option><option value="5">الفرقة الخامسة</option></select>
   <button class="btn" style="width:100%" onclick="doAuth()">ابدأي</button><div id="ae2" class="sm" style="color:#b0455a;margin-top:8px"></div></div>`;
 }
 async function doAuth(){
   const name = $("#an").value.trim(), y = $("#ay").value, err = $("#ae2");
-  if (!name || !y) return err.textContent = "اكتبي اسمك واختاري هل إنتي في سنة رابعة";
-  const {data,error} = await sb.auth.signInAnonymously({options:{data:{full_name:name,is_fourth_year:y==="true"}}});
+  if (!name || !y) return err.textContent = "اكتبي اسمك واختاري الفرقة بتاعتك";
+  const {data,error} = await sb.auth.signInAnonymously({options:{data:{full_name:name,year:y,is_fourth_year:y==="4"}}});
   if (error) return err.textContent = "مشكلة: "+error.message;
   me = data.user; $("#nav").style.display = ""; document.querySelector(".app").style.gridTemplateColumns = ""; start();
 }
